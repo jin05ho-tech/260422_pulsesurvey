@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>AhnLab Pulse Survey Analyzer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.js"></script>
+    <script>
+      stlite.mount({
+        requirements: ["pandas", "plotly", "openpyxl"],
+        entrypoint: "app.py",
+        files: {
+          "app.py": `
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+st.set_page_config(page_title="AhnLab Pulse Analyzer", layout="wide")
+st.title("📊 Pulse Survey 결과 분석 (보안 모드)")
+st.caption("🔒 모든 데이터는 현재 브라우저 내에서만 처리되며 외부로 유출되지 않습니다.")
+
+file = st.file_uploader("Pulse Survey 엑셀 파일(.xlsx)을 업로드하세요", type=["xlsx"])
+
+if file:
+    df = pd.read_excel(file, engine='openpyxl')
+    col_dept = '소속 부문을 선택해주세요'
+    col_q1 = '현재 직속 상위 리더와의 1on1은 어느 정도 수행되고 있나요?'
+    
+    # 1. 참여율 (원형)
+    st.subheader("1. 부문별 참여 비중")
+    fig1 = px.pie(df, names=col_dept, hole=0.4)
+    st.plotly_chart(fig1, use_container_width=True)
+
+    # 2. 시간대별 참여 (막대)
+    st.subheader("2. 시간대별 참여 추이")
+    df['hour'] = pd.to_datetime(df['시작 시간']).dt.hour
+    fig2 = px.bar(df.groupby('hour').size().reset_index(name='cnt'), x='hour', y='cnt', text_auto=True)
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # 3. 부문별 상세 비교 (%)
+    st.subheader("3. 부문별 응답 상세 비교 (%)")
+    dept_dist = df.groupby([col_dept, col_q1]).size().reset_index(name='cnt')
+    dept_dist['pct'] = (dept_dist['cnt'] / dept_dist.groupby(col_dept)['cnt'].transform('sum') * 100).round(1)
+    fig3 = px.bar(dept_dist, x=col_dept, y='pct', color=col_q1, text='pct', barmode='stack')
+    fig3.update_traces(texttemplate='%{text}%', textposition='inside')
+    st.plotly_chart(fig3, use_container_width=True)
+else:
+    st.info("엑셀 파일을 업로드하면 분석이 시작됩니다.")
+          `
+        }
+      }, document.getElementById("root"));
+    </script>
+  </body>
+</html>
