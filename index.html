@@ -2,12 +2,11 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>AhnLab Pulse Survey Analyzer</title>
+    <title>AhnLab Pulse Survey Dashboard</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.css" />
     <style>
-      /* 앱 배경색 및 폰트 미세 조정 */
       #root { background-color: #f8f9fa; }
-      .stMetric { border-left: 5px solid #007bff !important; }
+      .stMetric { border-left: 5px solid #007bff !important; background-color: white !important; }
     </style>
   </head>
   <body>
@@ -22,32 +21,38 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from datetime import datetime
 
 # 1. 페이지 설정
 st.set_page_config(page_title="AhnLab Pulse Analyzer", layout="wide")
 
-# 블루 테마 컬러 정의
-BLUE_PALETTE = ['#003366', '#0056b3', '#007bff', '#66b2ff', '#b3d7ff', '#eef6ff']
+# 상수 및 컬러 정의
+ORDER_1ON1 = ["주 1회 이상", "월 2~3회 수준", "월 1회 수준", "분기 1회 수준", "반기 1회 수준", "연 1회 이하"]
+COLORS_1ON1 = ['#eef6ff', '#b3d7ff', '#66b2ff', '#007bff', '#0056b3', '#003366'] # 위(옅음) -> 아래(진함)
 
-# 2. 데이터 전처리
-def preprocess_data(df):
-    df['시작 시간'] = pd.to_datetime(df['시작 시간'])
-    df['시간대'] = df['시작 시간'].dt.hour
-    return df
+# 2. 사이드바: 부문별 인원 설정
+st.sidebar.header("📋 부문별 정원 관리")
+dept_defaults = {
+    "연구소": 556, "사업부문": 121, "서비스사업부문": 216,
+    "마케팅&글로벌사업부문": 38, "CEO직속": 168, "CFO부문": 85
+}
 
-# 3. 메인 화면
-st.title("📊 Pulse Survey 실시간 분석 및 인사이트")
+dept_heads = {}
+for dept, val in dept_defaults.items():
+    dept_heads[dept] = st.sidebar.number_input(f"{dept} 정원", value=val, step=1)
 
-# 사이드바
-st.sidebar.header("📋 설문 관리 설정")
-target_headcount = st.sidebar.number_input("전체 대상 인원수", value=100, min_value=1)
+total_target = sum(dept_heads.values())
+
+# 3. 메인 화면 UI
+st.title("📊 Pulse Survey 고도화 분석 리포트")
 
 uploaded_file = st.file_uploader("Pulse Survey 결과 파일(Excel)을 업로드하세요.", type=["xlsx"])
 
 if uploaded_file:
     try:
-        df_raw = pd.read_excel(uploaded_file, engine='openpyxl')
-        df = preprocess_data(df_raw)
+        df = pd.read_excel(uploaded_file, engine='openpyxl')
+        df['시작 시간'] = pd.to_datetime(df['시작 시간'])
+        df['날짜'] = df['시작 시간'].dt.date
         
         col_dept = '소속 부문을 선택해주세요'
         col_q2 = '현재 직속 상위 리더와의 1on1은 어느 정도 수행되고 있나요?'
@@ -55,87 +60,135 @@ if uploaded_file:
 
         # 상단 핵심 지표
         participation_count = len(df)
-        participation_rate = (participation_count / target_headcount) * 100
+        total_rate = (participation_count / total_target) * 100
         
         c1, c2, c3 = st.columns(3)
-        with c1: st.metric("전체 참여율", f"{participation_rate:.1f}%")
-        with c2: st.metric("총 응답 수", f"{participation_count}건")
-        with c3: st.metric("평균 응답 시간", "약 3분")
+        with c1: st.metric("전체 참여율", f"{total_rate:.1f}%")
+        with c2: st.metric("총 응답 수", f"{participation_count} / {total_target}")
+        with c3: st.metric("기준 기간", "04.20 ~ 04.24")
 
         st.divider()
 
-        # [차트 1 & 2] 참여 현황
-        row1_col1, row1_col2 = st.columns(2)
+        # [1] 전체 및 부문별 참여율 현황
+        st.subheader("1. 부문별 참여율 현황")
+        
+        # 부문별 파이 차트 그리드 (3열 구성)
+        depts = list(dept_heads.keys())
+        rows = (len(depts) + 2) // 3
+        for r in range(rows):
+            cols = st.columns(3)
+            for i in range(3):
+                idx = r * 3 + i
+                if idx < len(depts):
+                    dept_name = depts[idx]
+                    target = dept_heads[dept_name]
+                    actual = len(df[df[col_dept] == dept_name])
+                    rate = (actual / target * 100) if target > 0 else 0
+                    
+                    with cols[i]:
+                        fig = go.Figure(data=[go.Pie(
+                            labels=['참여', '미참여'],
+                            values=[actual, max(0, target - actual)],
+                            hole=0.6,
+                            marker=dict(colors=['#007bff', '#f1f3f5']),
+                            showlegend=False
+                        )])
+                        fig.update_layout(title=f"{dept_name} ({rate:.1f}%)", height=200, margin=dict(t=40, b=10, l=10, r=10))
+                        st.plotly_chart(fig, use_container_width=True)
 
-        with row1_col1:
-            st.subheader("1. 전체 참여율 현황")
-            fig1 = go.Figure(data=[go.Pie(
-                labels=['참여', '미참여'],
-                values=[participation_count, max(0, target_headcount - participation_count)],
-                hole=0.5,
-                marker=dict(colors=['#007bff', '#e9ecef'])
-            )])
-            fig1.update_traces(textinfo='percent+label')
-            st.plotly_chart(fig1, use_container_width=True)
+        # [2] 시간대별 참여 추이 (4/20 ~ 4/24 고정)
+        st.subheader("2. 일자별 참여 추이 (04.20 ~ 04.24)")
+        date_range = pd.date_range(start='2026-04-20', end='2026-04-24').date
+        daily_counts = df.groupby('날짜').size().reindex(date_range, fill_value=0)
+        
+        fig2 = go.Figure(data=[go.Bar(
+            x=[d.strftime('%m-%d') for d in daily_counts.index],
+            y=daily_counts.values.tolist(),
+            text=daily_counts.values.tolist(),
+            textposition='auto',
+            marker_color='#003366'
+        )])
+        fig2.update_layout(xaxis_title="날짜", yaxis_title="응답 수", height=400)
+        st.plotly_chart(fig2, use_container_width=True)
 
-        with row1_col2:
-            st.subheader("2. 시간대별 참여 추이")
-            time_counts = df['시간대'].value_counts().sort_index()
-            fig2 = go.Figure(data=[go.Bar(
-                x=time_counts.index.tolist(),
-                y=time_counts.values.tolist(),
-                text=time_counts.values.tolist(),
+        # [3] 문항별 응답 분포 (순서 및 색상 고정)
+        st.subheader("3. 문항별 응답 분포 (순서/색상 가이드 적용)")
+        
+        def plot_ordered_bar(data_df, column, title):
+            # 정해진 순서대로 카운트 (데이터에 없는 항목은 0으로 처리)
+            counts = data_df[column].value_counts()
+            ordered_values = [counts.get(opt, 0) for opt in ORDER_1ON1]
+            
+            fig = go.Figure(data=[go.Bar(
+                x=ORDER_1ON1,
+                y=ordered_values,
+                text=ordered_values,
                 textposition='auto',
-                marker_color='#003366'
+                marker_color=COLORS_1ON1 # 순서에 맞춰 그라데이션 적용
             )])
-            fig2.update_layout(xaxis_title="시간 (24H)", yaxis_title="응답 수")
-            st.plotly_chart(fig2, use_container_width=True)
+            fig.update_layout(title=title, height=450)
+            st.plotly_chart(fig, use_container_width=True)
 
-        # [차트 3] 문항별 응답 분포
-        st.subheader("3. 문항별 전체 응답 분포")
-        row2_col1, row2_col2 = st.columns(2)
+        col_q_left, col_q_right = st.columns(2)
+        with col_q_left:
+            plot_ordered_bar(df, col_q2, "[Q2] 전체 1on1 수행 빈도")
+        with col_q_right:
+            # 부문별 상세 비교 (Stacked Bar)
+            pivot_df = pd.crosstab(df[col_dept], df[col_q2])
+            # 순서 재정렬
+            existing_cols = [c for c in ORDER_1ON1 if c in pivot_df.columns]
+            pivot_df = pivot_df[existing_cols]
+            # 비율 변환
+            pivot_pct = pivot_df.div(pivot_df.sum(axis=1), axis=0) * 100
 
-        with row2_col1:
-            st.markdown("**[Q2] 1on1 수행 빈도**")
-            q2_counts = df[col_q2].value_counts()
-            fig3_1 = go.Figure(data=[go.Pie(labels=q2_counts.index.tolist(), values=q2_counts.values.tolist(), hole=0.3, marker=dict(colors=BLUE_PALETTE))])
-            st.plotly_chart(fig3_1, use_container_width=True)
+            fig_stack = go.Figure()
+            for i, option in enumerate(existing_cols):
+                color_idx = ORDER_1ON1.index(option)
+                fig_stack.add_trace(go.Bar(
+                    name=option,
+                    x=pivot_pct.index.tolist(),
+                    y=pivot_pct[option].tolist(),
+                    marker_color=COLORS_1ON1[color_idx],
+                    text=[f"{v:.1f}%" for v in pivot_pct[option]],
+                    textposition='inside'
+                ))
+            fig_stack.update_layout(barmode='stack', title="부문별 1on1 비중 비교 (%)", height=450)
+            st.plotly_chart(fig_stack, use_container_width=True)
 
-        with row2_col2:
-            st.markdown("**[Q3] 호칭제 정착 수준**")
-            q3_counts = df[col_q3].value_counts()
-            fig3_2 = go.Figure(data=[go.Pie(labels=q3_counts.index.tolist(), values=q3_counts.values.tolist(), hole=0.3, marker=dict(colors=BLUE_PALETTE))])
-            st.plotly_chart(fig3_2, use_container_width=True)
-
-        # [차트 4 & 5] 부문별 상세 비교
-        st.subheader("4. 부문별 응답 상세 비교 (%)")
-        tab_q2, tab_q3 = st.tabs(["[Q2] 부문별 1on1", "[Q3] 부문별 호칭제"])
-
-        with tab_q2:
-            pivot_q2 = pd.crosstab(df[col_dept], df[col_q2], normalize='index') * 100
-            fig4 = go.Figure()
-            for i, col in enumerate(pivot_q2.columns):
-                fig4.add_trace(go.Bar(name=str(col), x=pivot_q2.index.tolist(), y=pivot_q2[col].tolist(), text=[f"{v}%" for v in pivot_q2[col].round(1).tolist()], marker_color=BLUE_PALETTE[i % len(BLUE_PALETTE)]))
-            fig4.update_layout(barmode='stack', yaxis_title="비율 (%)")
-            st.plotly_chart(fig4, use_container_width=True)
-
-        with tab_q3:
-            pivot_q3 = pd.crosstab(df[col_dept], df[col_q3], normalize='index') * 100
-            fig5 = go.Figure()
-            for i, col in enumerate(pivot_q3.columns):
-                fig5.add_trace(go.Bar(name=str(col), x=pivot_q3.index.tolist(), y=pivot_q3[col].tolist(), text=[f"{v}%" for v in pivot_q3[col].round(1).tolist()], marker_color=BLUE_PALETTE[i % len(BLUE_PALETTE)]))
-            fig5.update_layout(barmode='stack', yaxis_title="비율 (%)")
-            st.plotly_chart(fig5, use_container_width=True)
-
+        # [4] 부문별 인사이트 도출
         st.divider()
-        st.subheader("📝 종합 분석 의견")
-        st.info(f"1. **알림 효과:** {time_counts.idxmax()}시경 참여가 가장 활발했습니다.\\n2. **보안:** 데이터는 브라우저 메모리 내에서만 처리되었습니다.")
+        st.subheader("📝 부문별 인사이트 도출")
+        
+        insight_cols = st.columns(2)
+        dept_list = list(dept_heads.keys())
+        
+        for i, dept in enumerate(dept_list):
+            dept_df = df[df[col_dept] == dept]
+            with insight_cols[i % 2]:
+                with st.expander(f"📌 {dept} 상세 분석", expanded=True):
+                    if not dept_df.empty:
+                        d_rate = (len(dept_df) / dept_heads[dept]) * 100
+                        # 1on1 긍정 응답 (주 1회 이상 + 월 2~3회)
+                        positive_1on1 = len(dept_df[dept_df[col_q2].isin(["주 1회 이상", "월 2~3회 수준"])])
+                        pos_rate = (positive_1on1 / len(dept_df)) * 100
+                        
+                        st.write(f"- **참여율:** {d_rate:.1f}% (정원 {dept_heads[dept]}명 중 {len(dept_df)}명 참여)")
+                        st.write(f"- **1on1 활성화:** 정기적(주/월 단위) 1on1 비중이 **{pos_rate:.1f}%**로 나타납니다.")
+                        
+                        if d_rate < participation_rate:
+                            st.warning("⚠️ 전체 평균 대비 참여율이 낮습니다. 추가 독려가 필요합니다.")
+                        if pos_rate < 50:
+                            st.error("❗ 리더와의 소통 빈도가 낮습니다. 1on1 문화 정착을 위한 캠페인을 권장합니다.")
+                        else:
+                            st.success("✅ 소통 문화가 안정적으로 정착되어 가고 있는 부문입니다.")
+                    else:
+                        st.write("해당 부문의 응답 데이터가 아직 없습니다.")
 
     except Exception as e:
-        st.error(f"오류 발생: {e}")
+        st.error(f"데이터 분석 중 오류 발생: {e}")
 else:
-    st.info("파일을 업로드하면 블루 테마 리포트가 생성됩니다.")
-`
+    st.info("엑셀 파일을 업로드하면 부문별 정원 기반 참여율과 인사이트가 생성됩니다.")
+          `
         }
       }, document.getElementById("root"));
     </script>
