@@ -5,9 +5,10 @@
     <title>AhnLab Pulse Survey Analyzer</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.css" />
     <style>
-      /* 로딩 화면 디자인 살짝 보정 */
+      /* 앱 배경색 및 폰트 미세 조정 */
       #root { background-color: #f8f9fa; }
-    </script>
+      .stMetric { border-left: 5px solid #007bff !important; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
@@ -22,29 +23,22 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-# 1. 페이지 설정 및 블루 테마 스타일링
-st.set_page_config(page_title="AhnLab Pulse Survey Analyzer", layout="wide")
+# 1. 페이지 설정
+st.set_page_config(page_title="AhnLab Pulse Analyzer", layout="wide")
 
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border-left: 5px solid #007bff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    </style>
-    """, unsafe_allow_html=True)
+# 블루 테마 컬러 정의
+BLUE_PALETTE = ['#003366', '#0056b3', '#007bff', '#66b2ff', '#b3d7ff', '#eef6ff']
 
-# 블루 계열 컬러 팔레트 정의
-BLUE_PALETTE = ['#003366', '#0056b3', '#007bff', '#66b2ff', '#b3d7ff', '#e6f2ff']
-
-# 2. 데이터 전처리 함수
+# 2. 데이터 전처리
 def preprocess_data(df):
     df['시작 시간'] = pd.to_datetime(df['시작 시간'])
     df['시간대'] = df['시작 시간'].dt.hour
     return df
 
-# 3. 메인 화면 UI
+# 3. 메인 화면
 st.title("📊 Pulse Survey 실시간 분석 및 인사이트")
 
-# 사이드바 설정
+# 사이드바
 st.sidebar.header("📋 설문 관리 설정")
 target_headcount = st.sidebar.number_input("전체 대상 인원수", value=100, min_value=1)
 
@@ -55,12 +49,11 @@ if uploaded_file:
         df_raw = pd.read_excel(uploaded_file, engine='openpyxl')
         df = preprocess_data(df_raw)
         
-        # 컬럼명 매핑
         col_dept = '소속 부문을 선택해주세요'
         col_q2 = '현재 직속 상위 리더와의 1on1은 어느 정도 수행되고 있나요?'
         col_q3 = '현재 조직 내 호칭제도(님 문화) 정착 수준은 어느 정도인가요?'
 
-        # 상단 핵심 지표 (Metric 카드)
+        # 상단 핵심 지표
         participation_count = len(df)
         participation_rate = (participation_count / target_headcount) * 100
         
@@ -71,7 +64,7 @@ if uploaded_file:
 
         st.divider()
 
-        # [차트 1 & 2] 참여 현황 분석
+        # [차트 1 & 2] 참여 현황
         row1_col1, row1_col2 = st.columns(2)
 
         with row1_col1:
@@ -87,7 +80,7 @@ if uploaded_file:
 
         with row1_col2:
             st.subheader("2. 시간대별 참여 추이")
-            time_counts = df.groupby('시간대').size().sort_index()
+            time_counts = df['시간대'].value_counts().sort_index()
             fig2 = go.Figure(data=[go.Bar(
                 x=time_counts.index.tolist(),
                 y=time_counts.values.tolist(),
@@ -97,50 +90,32 @@ if uploaded_file:
             )])
             fig2.update_layout(xaxis_title="시간 (24H)", yaxis_title="응답 수")
             st.plotly_chart(fig2, use_container_width=True)
-            st.caption("💡 팀즈 알림 발송 직후 참여가 집중되는 경향을 확인할 수 있습니다.")
 
-        # [차트 3] 문항별 전체 응답 분포
+        # [차트 3] 문항별 응답 분포
         st.subheader("3. 문항별 전체 응답 분포")
         row2_col1, row2_col2 = st.columns(2)
 
         with row2_col1:
             st.markdown("**[Q2] 1on1 수행 빈도**")
             q2_counts = df[col_q2].value_counts()
-            fig3_1 = go.Figure(data=[go.Pie(
-                labels=q2_counts.index.tolist(),
-                values=q2_counts.values.tolist(),
-                hole=0.3,
-                marker=dict(colors=BLUE_PALETTE)
-            )])
+            fig3_1 = go.Figure(data=[go.Pie(labels=q2_counts.index.tolist(), values=q2_counts.values.tolist(), hole=0.3, marker=dict(colors=BLUE_PALETTE))])
             st.plotly_chart(fig3_1, use_container_width=True)
 
         with row2_col2:
             st.markdown("**[Q3] 호칭제 정착 수준**")
             q3_counts = df[col_q3].value_counts()
-            fig3_2 = go.Figure(data=[go.Pie(
-                labels=q3_counts.index.tolist(),
-                values=q3_counts.values.tolist(),
-                hole=0.3,
-                marker=dict(colors=BLUE_PALETTE)
-            )])
+            fig3_2 = go.Figure(data=[go.Pie(labels=q3_counts.index.tolist(), values=q3_counts.values.tolist(), hole=0.3, marker=dict(colors=BLUE_PALETTE))])
             st.plotly_chart(fig3_2, use_container_width=True)
 
-        # [차트 4 & 5] 부문별 응답 상세 분석
+        # [차트 4 & 5] 부문별 상세 비교
         st.subheader("4. 부문별 응답 상세 비교 (%)")
-        
         tab_q2, tab_q3 = st.tabs(["[Q2] 부문별 1on1", "[Q3] 부문별 호칭제"])
 
         with tab_q2:
             pivot_q2 = pd.crosstab(df[col_dept], df[col_q2], normalize='index') * 100
             fig4 = go.Figure()
             for i, col in enumerate(pivot_q2.columns):
-                fig4.add_trace(go.Bar(
-                    name=str(col),
-                    x=pivot_q2.index.tolist(),
-                    y=pivot_q2[col].tolist(),
-                    text=[f"{v}%" for v in pivot_q2[col].round(1).tolist()],
-                    marker_color=BLUE_PALETTE[i % len(BLUE_PALETTE)]
-                ))
+                fig4.add_trace(go.Bar(name=str(col), x=pivot_q2.index.tolist(), y=pivot_q2[col].tolist(), text=[f"{v}%" for v in pivot_q2[col].round(1).tolist()], marker_color=BLUE_PALETTE[i % len(BLUE_PALETTE)]))
             fig4.update_layout(barmode='stack', yaxis_title="비율 (%)")
             st.plotly_chart(fig4, use_container_width=True)
 
@@ -148,31 +123,19 @@ if uploaded_file:
             pivot_q3 = pd.crosstab(df[col_dept], df[col_q3], normalize='index') * 100
             fig5 = go.Figure()
             for i, col in enumerate(pivot_q3.columns):
-                fig5.add_trace(go.Bar(
-                    name=str(col),
-                    x=pivot_q3.index.tolist(),
-                    y=pivot_q3[col].tolist(),
-                    text=[f"{v}%" for v in pivot_q3[col].round(1).tolist()],
-                    marker_color=BLUE_PALETTE[i % len(BLUE_PALETTE)]
-                ))
+                fig5.add_trace(go.Bar(name=str(col), x=pivot_q3.index.tolist(), y=pivot_q3[col].tolist(), text=[f"{v}%" for v in pivot_q3[col].round(1).tolist()], marker_color=BLUE_PALETTE[i % len(BLUE_PALETTE)]))
             fig5.update_layout(barmode='stack', yaxis_title="비율 (%)")
             st.plotly_chart(fig5, use_container_width=True)
 
-        # [인사이트 요약]
         st.divider()
         st.subheader("📝 종합 분석 의견")
-        most_active_hour = time_counts.idxmax()
-        st.info(f"""
-        1. **알림 효과:** {most_active_hour}시경 참여가 가장 활발했습니다. 팀즈 알림 발송 전략이 유효함을 시사합니다.
-        2. **부문별 특징:** 부문별 누적 차트를 통해 1on1 및 호칭제 정착 수준이 낮은 조직을 타겟팅하여 관리할 수 있습니다.
-        3. **보안 확인:** 현재 분석은 브라우저 메모리 내에서만 수행되었으며, 데이터는 외부로 유출되지 않았습니다.
-        """)
+        st.info(f"1. **알림 효과:** {time_counts.idxmax()}시경 참여가 가장 활발했습니다.\\n2. **보안:** 데이터는 브라우저 메모리 내에서만 처리되었습니다.")
 
     except Exception as e:
-        st.error(f"데이터 분석 중 오류 발생: {e}")
+        st.error(f"오류 발생: {e}")
 else:
-    st.info("파일을 업로드하면 고도화된 블루 테마 리포트가 생성됩니다.")
-          `
+    st.info("파일을 업로드하면 블루 테마 리포트가 생성됩니다.")
+`
         }
       }, document.getElementById("root"));
     </script>
