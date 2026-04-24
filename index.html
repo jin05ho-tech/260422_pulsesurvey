@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.js"></script>
     <script>
       stlite.mount({
-        // 💥 핵심 수정: pyarrow를 완전히 삭제했습니다.
+        // 💥 pyarrow를 여기서 절대 넣지 마세요!
         requirements: ["pandas", "plotly", "openpyxl"], 
         entrypoint: "app.py",
         files: {
@@ -27,25 +27,32 @@ file = st.file_uploader("Pulse Survey 엑셀 파일(.xlsx)을 업로드하세요
 
 if file:
     try:
-        # pandas가 pyarrow 없이 기본 엔진으로 읽도록 합니다.
+        # 데이터 로드
         df = pd.read_excel(file, engine='openpyxl')
         
         # 컬럼명 설정 (실제 파일의 컬럼명과 일치해야 합니다)
         col_dept = '소속 부문을 선택해주세요'
         col_q1 = '현재 직속 상위 리더와의 1on1은 어느 정도 수행되고 있나요?'
         
+        # 💡 [핵심 해결책] 데이터프레임을 원시 파이썬 리스트로 변환하는 함수
+        # 이렇게 하면 Plotly가 내부적으로 pyarrow를 호출할 근거를 없앱니다.
+        def clean_data(data_frame):
+            return data_frame.to_dict('records')
+
         # 1. 참여율 (원형)
         st.subheader("1. 부문별 참여 비중")
         dept_counts = df[col_dept].value_counts().reset_index()
-        # 💡 데이터를 리스트 형식으로 변환하여 전달하면 pyarrow 충돌을 완벽히 피할 수 있습니다.
-        fig1 = px.pie(dept_counts.to_dict('records'), values='count', names=col_dept, hole=0.4)
+        dept_counts.columns = [col_dept, 'count']
+        
+        fig1 = px.pie(clean_data(dept_counts), values='count', names=col_dept, hole=0.4)
         st.plotly_chart(fig1, use_container_width=True)
 
         # 2. 시간대별 참여 (막대)
         st.subheader("2. 시간대별 참여 추이")
         df['hour'] = pd.to_datetime(df['시작 시간']).dt.hour
         hour_data = df.groupby('hour').size().reset_index(name='cnt')
-        fig2 = px.bar(hour_data.to_dict('records'), x='hour', y='cnt', text_auto=True)
+        
+        fig2 = px.bar(clean_data(hour_data), x='hour', y='cnt', text_auto=True)
         st.plotly_chart(fig2, use_container_width=True)
 
         # 3. 부문별 상세 비교 (%)
@@ -54,12 +61,12 @@ if file:
         total_per_dept = dept_dist.groupby(col_dept)['cnt'].transform('sum')
         dept_dist['pct'] = (dept_dist['cnt'] / total_per_dept * 100).round(1)
         
-        fig3 = px.bar(dept_dist.to_dict('records'), x=col_dept, y='pct', color=col_q1, text='pct', barmode='stack')
+        fig3 = px.bar(clean_data(dept_dist), x=col_dept, y='pct', color=col_q1, text='pct', barmode='stack')
         fig3.update_traces(texttemplate='%{text}%', textposition='inside')
         st.plotly_chart(fig3, use_container_width=True)
         
     except Exception as e:
-        st.error(f"분석 중 오류가 발생했습니다: {e}")
+        st.error(f"분석 중 오류가 발생했습니다. (에러: {e})")
 else:
     st.info("엑셀 파일을 업로드하면 분석이 시작됩니다.")
           `
