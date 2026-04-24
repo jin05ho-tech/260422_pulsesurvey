@@ -10,8 +10,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.js"></script>
     <script>
       stlite.mount({
-        // 💥 pyarrow를 명시적으로 추가하여 환경을 안정화합니다.
-        requirements: ["pandas", "plotly", "openpyxl", "pyarrow"], 
+        // 💥 핵심 수정: pyarrow를 완전히 삭제했습니다.
+        requirements: ["pandas", "plotly", "openpyxl"], 
         entrypoint: "app.py",
         files: {
           "app.py": `
@@ -27,14 +27,17 @@ file = st.file_uploader("Pulse Survey 엑셀 파일(.xlsx)을 업로드하세요
 
 if file:
     try:
+        # pandas가 pyarrow 없이 기본 엔진으로 읽도록 합니다.
         df = pd.read_excel(file, engine='openpyxl')
+        
+        # 컬럼명 설정 (실제 파일의 컬럼명과 일치해야 합니다)
         col_dept = '소속 부문을 선택해주세요'
         col_q1 = '현재 직속 상위 리더와의 1on1은 어느 정도 수행되고 있나요?'
         
         # 1. 참여율 (원형)
         st.subheader("1. 부문별 참여 비중")
         dept_counts = df[col_dept].value_counts().reset_index()
-        # 💡 핵심 수정: .to_dict('records')를 사용하여 pyarrow 충돌을 방지합니다.
+        # 💡 데이터를 리스트 형식으로 변환하여 전달하면 pyarrow 충돌을 완벽히 피할 수 있습니다.
         fig1 = px.pie(dept_counts.to_dict('records'), values='count', names=col_dept, hole=0.4)
         st.plotly_chart(fig1, use_container_width=True)
 
@@ -56,7 +59,7 @@ if file:
         st.plotly_chart(fig3, use_container_width=True)
         
     except Exception as e:
-        st.error(f"분석 중 오류가 발생했습니다. 데이터 형식을 확인해주세요. (에러: {e})")
+        st.error(f"분석 중 오류가 발생했습니다: {e}")
 else:
     st.info("엑셀 파일을 업로드하면 분석이 시작됩니다.")
           `
