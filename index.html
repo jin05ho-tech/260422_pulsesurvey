@@ -33,6 +33,7 @@ DEPT_ORDER = ["연구소", "사업부문", "서비스사업부문", "마케팅&�
 ORDER_1ON1 = ["주 1회 이상", "월 2~3회 수준", "월 1회 수준", "분기 1회 수준", "반기 1회 수준", "연 1회 이하"]
 ORDER_TITLE = ["님 호칭만 사용", "직위와 님 호칭 혼용", "기존 직위 위주 사용"]
 
+# 긍정 응답(상단)일수록 진한 색상
 COLORS_1ON1 = ['#003366', '#0056b3', '#007bff', '#66b2ff', '#b3d7ff', '#eef6ff']
 COLORS_TITLE = ['#003366', '#007bff', '#eef6ff']
 HIGHLIGHT_TIMES = ["04-21 10시", "04-22 09시", "04-23 09시", "04-24 09시"]
@@ -62,7 +63,9 @@ if uploaded_file:
         avg_title_rate = (len(df[df[col_q3] == "님 호칭만 사용"]) / p_count * 100)
         
         c1, c2, c3 = st.columns(3)
-        with c1: st.metric("전체 참여율", f"{(p_count / total_target * 100):.1f}%")
+        with c1: 
+            # 요청사항: 응답수/정원을 숫자로 함께 표기
+            st.metric("전체 참여율", f"{(p_count / total_target * 100):.1f}%", delta=f"{p_count} / {total_target} (참여/정원)", delta_color="normal")
         with c2: st.metric("1on1 활성화(전사)", f"{avg_1on1_rate:.1f}%")
         with c3: st.metric("호칭제 안착(전사)", f"{avg_title_rate:.1f}%")
 
@@ -93,14 +96,33 @@ if uploaded_file:
                     rate = (actual / target * 100) if target > 0 else 0
                     with cols[i]:
                         fig = go.Figure(data=[go.Pie(labels=['참여', '미참여'], values=[actual, max(0, target - actual)], hole=0.6, marker=dict(colors=['#007bff', '#f1f3f5']), showlegend=False)])
-                        fig.update_layout(title=f"{d_name}<br>({rate:.1f}%)", height=180, margin=dict(t=50, b=10, l=10, r=10))
+                        fig.update_layout(title=f"{d_name}<br>({rate:.1f}% / {actual}명)", height=180, margin=dict(t=50, b=10, l=10, r=10))
                         st.plotly_chart(fig, use_container_width=True)
 
-        # [3] 조직 문화 상세 분석 (호버 템플릿 수정)
-        def draw_culture_detailed(column, order, title, palette):
+        # [3] 전사 기준 응답 비율 (복구)
+        st.subheader("3. 전사 기준 문항별 응답 분포")
+        c_q2, c_q3 = st.columns(2)
+        
+        with c_q2:
+            st.markdown("**[Q2] 1on1 수행 빈도 (전사)**")
+            q2_total = df[col_q2].value_counts().reindex(ORDER_1ON1, fill_value=0)
+            fig_q2 = go.Figure(data=[go.Bar(x=list(ORDER_1ON1), y=q2_total.tolist(), text=q2_total.tolist(), textposition='auto', marker_color=COLORS_1ON1)])
+            fig_q2.update_layout(height=400)
+            st.plotly_chart(fig_q2, use_container_width=True)
+
+        with c_q3:
+            st.markdown("**[Q3] 호칭제 정착 수준 (전사)**")
+            q3_total = df[col_q3].value_counts().reindex(ORDER_TITLE, fill_value=0)
+            fig_q3 = go.Figure(data=[go.Bar(x=list(ORDER_TITLE), y=q3_total.tolist(), text=q3_total.tolist(), textposition='auto', marker_color=COLORS_TITLE)])
+            fig_q3.update_layout(height=400)
+            st.plotly_chart(fig_q3, use_container_width=True)
+
+        # [4] 부문별 상세 분석
+        st.subheader("4. 부문별 조직 문화 비교 (비율 표시 및 빈도 호버)")
+        
+        def draw_dept_culture(column, order, title, palette):
             pivot = pd.crosstab(df[col_dept], df[column]).reindex(index=DEPT_ORDER, columns=order, fill_value=0)
             pivot_pct = (pivot.div(pivot.sum(axis=1), axis=0) * 100).round(1).fillna(0)
-            
             fig = go.Figure()
             for i, opt in enumerate(order):
                 fig.add_trace(go.Bar(
@@ -109,27 +131,19 @@ if uploaded_file:
                     text=[f"{v}%" if v > 0 else "" for v in pivot_pct[opt].tolist()],
                     textposition='inside',
                     customdata=pivot[opt].tolist(),
-                    # 호버 시 '부문' 대신 '응답(칼럼값)'이 나오도록 수정
                     hovertemplate=f"응답: {opt}<br>비율: %{{y}}%<br>빈도: %{{customdata}}건<extra></extra>"
                 ))
             fig.update_layout(barmode='stack', height=500, title=f"부문별 {title} 비중 비교 (%)")
             st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("3. 조직 문화 상세 분석 (비율 표시 및 빈도 호버)")
         cl, cr = st.columns(2)
-        with cl: draw_culture_detailed(col_q2, ORDER_1ON1, "1on1 수행 빈도", COLORS_1ON1)
-        with cr: draw_culture_detailed(col_q3, ORDER_TITLE, "호칭제 정착 수준", COLORS_TITLE)
+        with cl: draw_dept_culture(col_q2, ORDER_1ON1, "1on1 빈도", COLORS_1ON1)
+        with cr: draw_dept_culture(col_q3, ORDER_TITLE, "호칭제 수준", COLORS_TITLE)
 
-        # [4] 부문별 인사이트 (전사 평균 강조 추가)
+        # [5] 부문별 인사이트
         st.divider()
         st.subheader("📝 부문별 조직 문화 인사이트")
-        
-        # 전사 평균 요약 지표 재표기
-        st.success(f"""
-        **💡 [전사 평균 지표 요약]**
-        * **1on1 활성화도:** {avg_1on1_rate:.1f}% (산식: 주/월 단위 응답 수 / 전체 응답 수)
-        * **호칭제 안착도:** {avg_title_rate:.1f}% (산식: '님 호칭만 사용' 응답 수 / 전체 응답 수)
-        """)
+        st.success(f"**💡 [전사 평균 지표]** 1on1 활성화도: {avg_1on1_rate:.1f}%  |  호칭제 안착도: {avg_title_rate:.1f}%")
 
         ins_cols = st.columns(2)
         for i, dept in enumerate(DEPT_ORDER):
@@ -141,16 +155,15 @@ if uploaded_file:
                         d_title = (len(d_df[d_df[col_q3] == "님 호칭만 사용"]) / len(d_df)) * 100
                         diff_1 = d_1on1 - avg_1on1_rate
                         diff_t = d_title - avg_title_rate
-                        
-                        st.write(f"💬 **1on1 활성화:** {d_1on1:.1f}% ({'🟢 우수' if diff_1 >= 0 else '🔴 미흡'}, 전사 평균 대비 {diff_1:+.1f}%)")
-                        st.write(f"🤝 **호칭제 안착:** {d_title:.1f}% ({'🟢 우수' if diff_t >= 0 else '🔴 미흡'}, 전사 평균 대비 {diff_t:+.1f}%)")
+                        st.write(f"💬 **1on1 활성화:** {d_1on1:.1f}% ({'🟢 우수' if diff_1 >= 0 else '🔴 미흡'}, 전사 대비 {diff_1:+.1f}%)")
+                        st.write(f"🤝 **호칭제 안착:** {d_title:.1f}% ({'🟢 우수' if diff_t >= 0 else '🔴 미흡'}, 전사 대비 {diff_t:+.1f}%)")
                     else:
                         st.write("응답 데이터가 없습니다.")
 
     except Exception as e:
         st.error(f"오류 발생: {e}")
 else:
-    st.info("파일을 업로드하면 고도화된 인사이트 리포트가 생성됩니다.")
+    st.info("파일을 업로드하면 인사이트 리포트가 생성됩니다.")
           `
         }
       }, document.getElementById("root"));
