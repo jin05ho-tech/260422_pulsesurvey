@@ -14,7 +14,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.js"></script>
     <script>
       stlite.mount({
-        // 💥 pyarrow를 요구 목록에서 완전히 제거합니다.
         requirements: ["pandas", "plotly", "openpyxl"],
         entrypoint: "app.py",
         files: {
@@ -24,33 +23,39 @@ import pandas as pd
 import plotly.graph_objects as go
 import os
 
-# 💥 [중요] 시스템 레벨에서 pyarrow 사용을 강제 차단합니다.
+# 시스템 설정: pyarrow 차단
 os.environ["STREAMLIT_PYARROW_DISABLE_CHUNKING"] = "true"
 
 st.set_page_config(page_title="AhnLab Pulse Analyzer", layout="wide")
 
-# 상수 및 색상 정의
+# 1. 고정 설정값 (순서 및 색상)
+DEPT_ORDER = ["연구소", "사업부문", "서비스사업부문", "마케팅&글로벌사업부문", "기술지원본부", "제품기획본부", "CFO부문"]
 ORDER_1ON1 = ["주 1회 이상", "월 2~3회 수준", "월 1회 수준", "분기 1회 수준", "반기 1회 수준", "연 1회 이하"]
 ORDER_TITLE = ["님 호칭만 사용", "직위와 님 호칭 혼용", "기존 직위 위주 사용"]
-COLORS_BLUE = ['#eef6ff', '#b3d7ff', '#66b2ff', '#007bff', '#0056b3', '#003366']
 
-# 부문 정원 설정
+# 색상 반전: 긍정(상단)이 진한색, 부정(하단)이 연한색
+COLORS_BLUE_REV = ['#003366', '#0056b3', '#007bff', '#66b2ff', '#b3d7ff', '#eef6ff']
+COLORS_TITLE_REV = ['#003366', '#007bff', '#eef6ff']
+
+# 2. 사이드바: 정원 관리 (순서 고정)
+st.sidebar.header("📋 부문별 정원 관리")
 dept_defaults = {
     "연구소": 556, "사업부문": 121, "서비스사업부문": 216,
-    "마케팅&글로벌사업부문": 38, "기술지원본부": 127, 
-    "제품기획본부": 38, "CFO부문": 88
+    "마케팅&글로벌사업부문": 38, "기술지원본부": 127, "제품기획본부": 38, "CFO부문": 88
 }
 
-st.sidebar.header("📋 부문별 정원 관리")
-dept_heads = {d: st.sidebar.number_input(f"{d} 정원", value=v) for d, v in dept_defaults.items()}
+dept_heads = {}
+for dept in DEPT_ORDER:
+    dept_heads[dept] = st.sidebar.number_input(f"{dept} 정원", value=dept_defaults[dept])
+
 total_target = sum(dept_heads.values())
 
+# 3. 메인 화면
 st.title("📊 Pulse Survey 문화 진단 대시보드")
 uploaded_file = st.file_uploader("Pulse Survey 결과 파일(Excel)을 업로드하세요.", type=["xlsx"])
 
 if uploaded_file:
     try:
-        # 데이터 로드 및 전처리
         df = pd.read_excel(uploaded_file, engine='openpyxl')
         df['시작 시간'] = pd.to_datetime(df['시작 시간'])
         df['날짜시간'] = df['시작 시간'].dt.strftime('%m-%d %H시')
@@ -59,81 +64,97 @@ if uploaded_file:
         col_q2 = '현재 직속 상위 리더와의 1on1은 어느 정도 수행되고 있나요?'
         col_q3 = '현재 조직 내 호칭제도(님 문화) 정착 수준은 어느 정도인가요?'
 
-        # 지표 계산
+        # 전사 평균 계산
         p_count = len(df)
-        total_rate_val = (p_count / total_target) * 100
+        avg_1on1_rate = (len(df[df[col_q2].isin(ORDER_1ON1[:3])]) / p_count * 100)
+        avg_title_rate = (len(df[df[col_q3] == "님 호칭만 사용"]) / p_count * 100)
         
         c1, c2, c3 = st.columns(3)
-        with c1: st.metric("전체 참여율", f"{total_rate_val:.1f}%")
-        with c2: st.metric("총 응답 수", f"{p_count} / {total_target}")
-        with c3: st.metric("진단 지표", "1on1 / 호칭제도")
+        with c1: st.metric("전체 참여율", f"{(p_count / total_target * 100):.1f}%")
+        with c2: st.metric("1on1 활성화(전사)", f"{avg_1on1_rate:.1f}%")
+        with c3: st.metric("호칭제 안착(전사)", f"{avg_title_rate:.1f}%")
 
         st.divider()
 
-        # 1. 시간대별 추이 (Highlight)
+        # 1. 시간대별 추이
         st.subheader("1. 일자/시간별 참여 추이 (Teams 알림 효과)")
         trend = df.groupby('날짜시간').size().reset_index(name='cnt')
         max_v = trend['cnt'].max()
-        
         fig1 = go.Figure(data=[go.Bar(
-            x=trend['날짜시간'].tolist(), # 💥 DataFrame이 아닌 List로 전달
+            x=trend['날짜시간'].tolist(), 
             y=trend['cnt'].tolist(),
-            text=trend['cnt'].tolist(),
-            textposition='auto',
             marker_color=['#ff4b4b' if v == max_v else '#003366' for v in trend['cnt']]
         )])
         st.plotly_chart(fig1, use_container_width=True)
 
-        # 2. 문화 분석 함수 (go.Figure 수동 구성으로 pyarrow 원천 차단)
+        # 2. 문화 분석
         def draw_culture(column, order, title, palette):
-            tab1, tab2 = st.tabs(["전체 분포", "부문별 비교"])
+            tab1, tab2 = st.tabs([f"{title} 전체", f"부문별 비교"])
             with tab1:
                 cnts = df[column].value_counts().reindex(order, fill_value=0)
-                fig = go.Figure(data=[go.Bar(x=list(order), y=cnts.tolist(), text=cnts.tolist(), textposition='auto', marker_color=palette)])
+                fig = go.Figure(data=[go.Bar(x=list(order), y=cnts.tolist(), marker_color=palette)])
                 st.plotly_chart(fig, use_container_width=True)
             with tab2:
-                pivot = pd.crosstab(df[col_dept], df[column]).reindex(columns=order, fill_value=0)
-                pivot_pct = (pivot.div(pivot.sum(axis=1), axis=0) * 100).round(1)
+                # 부문 순서 고정 (DEPT_ORDER 기준)
+                pivot = pd.crosstab(df[col_dept], df[column]).reindex(index=DEPT_ORDER, columns=order, fill_value=0)
+                pivot_pct = (pivot.div(pivot.sum(axis=1), axis=0) * 100).round(1).fillna(0)
                 
                 fig_s = go.Figure()
                 for i, opt in enumerate(order):
                     fig_s.add_trace(go.Bar(
                         name=opt, x=pivot_pct.index.tolist(), y=pivot_pct[opt].tolist(),
                         marker_color=palette[i % len(palette)],
-                        text=[f"{v}%" for v in pivot_pct[opt].tolist()],
-                        textposition='inside',
-                        textfont=dict(size=12)
+                        text=[f"{v}%" if v > 0 else "" for v in pivot_pct[opt].tolist()],
+                        textposition='inside', textfont=dict(size=12)
                     ))
                 fig_s.update_layout(barmode='stack', height=500)
                 st.plotly_chart(fig_s, use_container_width=True)
 
         st.subheader("2. 조직 문화 상세 분석")
         cl, cr = st.columns(2)
-        with cl: draw_culture(col_q2, ORDER_1ON1, "1on1 빈도", COLORS_BLUE)
-        with cr: draw_culture(col_q3, ORDER_TITLE, "호칭제 수준", COLORS_BLUE[:3])
+        with cl: draw_culture(col_q2, ORDER_1ON1, "1on1 빈도", COLORS_BLUE_REV)
+        with cr: draw_culture(col_q3, ORDER_TITLE, "호칭제 수준", COLORS_TITLE_REV)
 
-        # 3. 인사이트
+        # 3. 부문별 인사이트 (상대 비교)
         st.divider()
-        st.subheader("📝 부문별 조직 문화 인사이트")
+        st.subheader("📝 부문별 조직 문화 인사이트 (전사 평균 대비)")
+        
+        st.markdown(f"""
+        > **[전사 평균 가이드]**
+        > * **1on1 활성화도:** {avg_1on1_rate:.1f}% (산식: 주/월 단위 응답 수 / 전체 응답 수)
+        > * **호칭제 안착도:** {avg_title_rate:.1f}% (산식: '님 호칭만 사용' 응답 수 / 전체 응답 수)
+        """)
+
         ins_cols = st.columns(2)
-        for i, dept in enumerate(dept_heads.keys()):
+        for i, dept in enumerate(DEPT_ORDER):
             d_df = df[df[col_dept] == dept]
             with ins_cols[i % 2]:
-                with st.expander(f"📌 {dept} 조직 문화 진단", expanded=True):
+                with st.expander(f"📌 {dept} 분석 리포트", expanded=True):
                     if not d_df.empty:
-                        p_1on1 = (len(d_df[d_df[col_q2].isin(ORDER_1ON1[:3])]) / len(d_df)) * 100
-                        p_title = (len(d_df[d_df[col_q3] == "님 호칭만 사용"]) / len(d_df)) * 100
-                        st.write(f"✅ **1on1 활성화도:** 정기 소통 비중 **{p_1on1:.1f}%**")
-                        st.write(f"✅ **호칭제 안착도:** '님' 문화 정착 비중 **{p_title:.1f}%**")
-                        if p_1on1 < 50: st.warning("💬 리더와의 소통 빈도 확대가 필요합니다.")
-                        elif p_title < 40: st.error("👔 기존 직위 호칭 사용이 빈번합니다.")
-                        else: st.success("🌟 소통 문화가 우수한 조직입니다.")
-                    else: st.write("응답 데이터가 없습니다.")
+                        d_1on1 = (len(d_df[d_df[col_q2].isin(ORDER_1ON1[:3])]) / len(d_df)) * 100
+                        d_title = (len(d_df[d_df[col_q3] == "님 호칭만 사용"]) / len(d_df)) * 100
+                        
+                        # 인사이트 메시지 구성
+                        diff_1on1 = d_1on1 - avg_1on1_rate
+                        diff_title = d_title - avg_title_rate
+                        
+                        status_1 = "🟢 우수 (평균 대비 +{:.1f}%)" if diff_1on1 >= 0 else "🔴 미흡 (평균 대비 {:.1f}%)"
+                        status_2 = "🟢 우수 (평균 대비 +{:.1f}%)" if diff_title >= 0 else "🔴 미흡 (평균 대비 {:.1f}%)"
+
+                        st.write(f"💬 **1on1 활성화:** {d_1on1:.1f}% → {status_1.format(diff_1on1)}")
+                        st.write(f"🤝 **호칭제 안착:** {d_title:.1f}% → {status_2.format(diff_title)}")
+                        
+                        if diff_1on1 < 0 or diff_title < 0:
+                            st.info("💡 해당 부문 리더 대상 집중 가이드 및 문화 전파가 필요합니다.")
+                        else:
+                            st.success("✨ 전사 평균을 상회하는 긍정적인 수치를 보이고 있습니다.")
+                    else:
+                        st.write("응답 데이터가 없습니다.")
 
     except Exception as e:
         st.error(f"오류 발생: {e}")
 else:
-    st.info("파일을 업로드하면 인사이트 리포트가 생성됩니다.")
+    st.info("파일을 업로드하면 부문별 상대 분석 리포트가 생성됩니다.")
 `
         }
       }, document.getElementById("root"));
