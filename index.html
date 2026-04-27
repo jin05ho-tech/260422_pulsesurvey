@@ -6,7 +6,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.58.0/build/stlite.css" />
     <style>
       #root { background-color: #f8f9fa; }
-      .stMetric { border-left: 5px solid #007bff !important; background-color: white !important; }
+      .stMetric { border-left: 5px solid #007bff !important; background-color: white !important; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     </style>
   </head>
   <body>
@@ -26,15 +26,17 @@ from datetime import datetime
 # 1. 페이지 설정
 st.set_page_config(page_title="AhnLab Pulse Analyzer", layout="wide")
 
-# 상수 및 컬러 정의
+# 상수 정의
 ORDER_1ON1 = ["주 1회 이상", "월 2~3회 수준", "월 1회 수준", "분기 1회 수준", "반기 1회 수준", "연 1회 이하"]
-COLORS_1ON1 = ['#eef6ff', '#b3d7ff', '#66b2ff', '#007bff', '#0056b3', '#003366'] # 위(옅음) -> 아래(진함)
+ORDER_TITLE = ["님 호칭만 사용", "직위와 님 호칭 혼용", "기존 직위 위주 사용"]
+COLORS_BLUE = ['#eef6ff', '#b3d7ff', '#66b2ff', '#007bff', '#0056b3', '#003366']
 
-# 2. 사이드바: 부문별 인원 설정
+# 2. 사이드바: 조직 정원 설정 (요청사항 반영)
 st.sidebar.header("📋 부문별 정원 관리")
 dept_defaults = {
     "연구소": 556, "사업부문": 121, "서비스사업부문": 216,
-    "마케팅&글로벌사업부문": 38, "CEO직속": 168, "CFO부문": 85
+    "마케팅&글로벌사업부문": 38, "기술지원본부": 127, 
+    "제품기획본부": 38, "CFO부문": 88
 }
 
 dept_heads = {}
@@ -43,8 +45,8 @@ for dept, val in dept_defaults.items():
 
 total_target = sum(dept_heads.values())
 
-# 3. 메인 화면 UI
-st.title("📊 Pulse Survey 고도화 분석 리포트")
+# 3. 메인 화면
+st.title("📊 Pulse Survey 문화 진단 대시보드")
 
 uploaded_file = st.file_uploader("Pulse Survey 결과 파일(Excel)을 업로드하세요.", type=["xlsx"])
 
@@ -52,142 +54,110 @@ if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file, engine='openpyxl')
         df['시작 시간'] = pd.to_datetime(df['시작 시간'])
-        df['날짜'] = df['시작 시간'].dt.date
+        df['날짜시간'] = df['시작 시간'].dt.strftime('%m-%d %H시')
         
         col_dept = '소속 부문을 선택해주세요'
         col_q2 = '현재 직속 상위 리더와의 1on1은 어느 정도 수행되고 있나요?'
         col_q3 = '현재 조직 내 호칭제도(님 문화) 정착 수준은 어느 정도인가요?'
 
-        # 상단 핵심 지표
+        # 핵심 지표
         participation_count = len(df)
-        total_rate = (participation_count / total_target) * 100
+        total_rate_val = (participation_count / total_target) * 100
         
         c1, c2, c3 = st.columns(3)
-        with c1: st.metric("전체 참여율", f"{total_rate:.1f}%")
+        with c1: st.metric("전체 참여율", f"{total_rate_val:.1f}%")
         with c2: st.metric("총 응답 수", f"{participation_count} / {total_target}")
-        with c3: st.metric("기준 기간", "04.20 ~ 04.24")
+        with c3: st.metric("진단 지표", "1on1 / 호칭제도")
 
         st.divider()
 
-        # [1] 전체 및 부문별 참여율 현황
-        st.subheader("1. 부문별 참여율 현황")
+        # [1] 시간대별 상세 추이 (Highlight 적용)
+        st.subheader("1. 일자/시간별 참여 추이 (Teams 알림 효과)")
+        time_trend = df.groupby('날짜시간').size().reset_index(name='cnt')
+        max_idx = time_trend['cnt'].idxmax()
         
-        # 부문별 파이 차트 그리드 (3열 구성)
-        depts = list(dept_heads.keys())
-        rows = (len(depts) + 2) // 3
-        for r in range(rows):
-            cols = st.columns(3)
-            for i in range(3):
-                idx = r * 3 + i
-                if idx < len(depts):
-                    dept_name = depts[idx]
-                    target = dept_heads[dept_name]
-                    actual = len(df[df[col_dept] == dept_name])
-                    rate = (actual / target * 100) if target > 0 else 0
-                    
-                    with cols[i]:
-                        fig = go.Figure(data=[go.Pie(
-                            labels=['참여', '미참여'],
-                            values=[actual, max(0, target - actual)],
-                            hole=0.6,
-                            marker=dict(colors=['#007bff', '#f1f3f5']),
-                            showlegend=False
-                        )])
-                        fig.update_layout(title=f"{dept_name} ({rate:.1f}%)", height=200, margin=dict(t=40, b=10, l=10, r=10))
-                        st.plotly_chart(fig, use_container_width=True)
-
-        # [2] 시간대별 참여 추이 (4/20 ~ 4/24 고정)
-        st.subheader("2. 일자별 참여 추이 (04.20 ~ 04.24)")
-        date_range = pd.date_range(start='2026-04-20', end='2026-04-24').date
-        daily_counts = df.groupby('날짜').size().reindex(date_range, fill_value=0)
-        
-        fig2 = go.Figure(data=[go.Bar(
-            x=[d.strftime('%m-%d') for d in daily_counts.index],
-            y=daily_counts.values.tolist(),
-            text=daily_counts.values.tolist(),
+        fig_trend = go.Figure(data=[go.Bar(
+            x=time_trend['날짜시간'],
+            y=time_trend['cnt'],
+            text=time_trend['cnt'],
             textposition='auto',
-            marker_color='#003366'
+            marker_color=['#ff4b4b' if i == max_idx else '#003366' for i in range(len(time_trend))]
         )])
-        fig2.update_layout(xaxis_title="날짜", yaxis_title="응답 수", height=400)
-        st.plotly_chart(fig2, use_container_width=True)
+        fig_trend.update_layout(height=400, margin=dict(t=20, b=20, l=20, r=20))
+        st.plotly_chart(fig_trend, use_container_width=True)
 
-        # [3] 문항별 응답 분포 (순서 및 색상 고정)
-        st.subheader("3. 문항별 응답 분포 (순서/색상 가이드 적용)")
+        # [2] 1on1 및 호칭제도 분석
+        st.subheader("2. 조직 문화 상세 분석")
         
-        def plot_ordered_bar(data_df, column, title):
-            # 정해진 순서대로 카운트 (데이터에 없는 항목은 0으로 처리)
-            counts = data_df[column].value_counts()
-            ordered_values = [counts.get(opt, 0) for opt in ORDER_1ON1]
-            
-            fig = go.Figure(data=[go.Bar(
-                x=ORDER_1ON1,
-                y=ordered_values,
-                text=ordered_values,
-                textposition='auto',
-                marker_color=COLORS_1ON1 # 순서에 맞춰 그라데이션 적용
-            )])
-            fig.update_layout(title=title, height=450)
-            st.plotly_chart(fig, use_container_width=True)
+        def plot_culture_chart(column, order, title, palette):
+            tab1, tab2 = st.tabs(["전체 분포", "부문별 비교"])
+            with tab1:
+                counts = df[column].value_counts().reindex(order, fill_value=0)
+                fig = go.Figure(data=[go.Bar(x=order, y=counts, text=counts, textposition='auto', marker_color=palette)])
+                fig.update_layout(title=f"{title} 전체 현황", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            with tab2:
+                pivot = pd.crosstab(df[col_dept], df[column])
+                existing_order = [c for c in order if c in pivot.columns]
+                pivot = pivot[existing_order]
+                pivot_pct = pivot.div(pivot.sum(axis=1), axis=0) * 100
+                
+                fig_s = go.Figure()
+                for i, opt in enumerate(existing_order):
+                    color_idx = order.index(opt)
+                    fig_s.add_trace(go.Bar(
+                        name=opt, x=pivot_pct.index, y=pivot_pct[opt],
+                        marker_color=palette[color_idx % len(palette)],
+                        text=[f"{v:.1f}%" for v in pivot_pct[opt]],
+                        textposition='inside',
+                        textfont=dict(size=12) # 레이블 크기 고정
+                    ))
+                fig_s.update_layout(barmode='stack', height=500, uniformtext=dict(minsize=10, mode='hide'))
+                st.plotly_chart(fig_s, use_container_width=True)
 
-        col_q_left, col_q_right = st.columns(2)
-        with col_q_left:
-            plot_ordered_bar(df, col_q2, "[Q2] 전체 1on1 수행 빈도")
-        with col_q_right:
-            # 부문별 상세 비교 (Stacked Bar)
-            pivot_df = pd.crosstab(df[col_dept], df[col_q2])
-            # 순서 재정렬
-            existing_cols = [c for c in ORDER_1ON1 if c in pivot_df.columns]
-            pivot_df = pivot_df[existing_cols]
-            # 비율 변환
-            pivot_pct = pivot_df.div(pivot_df.sum(axis=1), axis=0) * 100
+        col_left, col_right = st.columns(2)
+        with col_left:
+            plot_culture_chart(col_q2, ORDER_1ON1, "1on1 수행 빈도", COLORS_BLUE)
+        with col_right:
+            plot_culture_chart(col_q3, ORDER_TITLE, "호칭제 정착 수준", COLORS_BLUE[:3])
 
-            fig_stack = go.Figure()
-            for i, option in enumerate(existing_cols):
-                color_idx = ORDER_1ON1.index(option)
-                fig_stack.add_trace(go.Bar(
-                    name=option,
-                    x=pivot_pct.index.tolist(),
-                    y=pivot_pct[option].tolist(),
-                    marker_color=COLORS_1ON1[color_idx],
-                    text=[f"{v:.1f}%" for v in pivot_pct[option]],
-                    textposition='inside'
-                ))
-            fig_stack.update_layout(barmode='stack', title="부문별 1on1 비중 비교 (%)", height=450)
-            st.plotly_chart(fig_stack, use_container_width=True)
-
-        # [4] 부문별 인사이트 도출
+        # [3] 부문별 인사이트 (오류 수정 및 내용 개편)
         st.divider()
-        st.subheader("📝 부문별 인사이트 도출")
+        st.subheader("📝 부문별 조직 문화 인사이트")
         
-        insight_cols = st.columns(2)
+        ins_cols = st.columns(2)
         dept_list = list(dept_heads.keys())
         
         for i, dept in enumerate(dept_list):
             dept_df = df[df[col_dept] == dept]
-            with insight_cols[i % 2]:
-                with st.expander(f"📌 {dept} 상세 분석", expanded=True):
+            with ins_cols[i % 2]:
+                with st.expander(f"📌 {dept} 조직 문화 진단", expanded=True):
                     if not dept_df.empty:
-                        d_rate = (len(dept_df) / dept_heads[dept]) * 100
-                        # 1on1 긍정 응답 (주 1회 이상 + 월 2~3회)
-                        positive_1on1 = len(dept_df[dept_df[col_q2].isin(["주 1회 이상", "월 2~3회 수준"])])
-                        pos_rate = (positive_1on1 / len(dept_df)) * 100
+                        # 1on1 긍정 지표 (주/월 단위)
+                        pos_1on1 = len(dept_df[dept_df[col_q2].isin(["주 1회 이상", "월 2~3회 수준", "월 1회 수준"])])
+                        pos_1on1_rate = (pos_1on1 / len(dept_df)) * 100
                         
-                        st.write(f"- **참여율:** {d_rate:.1f}% (정원 {dept_heads[dept]}명 중 {len(dept_df)}명 참여)")
-                        st.write(f"- **1on1 활성화:** 정기적(주/월 단위) 1on1 비중이 **{pos_rate:.1f}%**로 나타납니다.")
+                        # 호칭제 긍정 지표 (님 호칭만 사용)
+                        pos_title = len(dept_df[dept_df[col_q3] == "님 호칭만 사용"])
+                        pos_title_rate = (pos_title / len(dept_df)) * 100
                         
-                        if d_rate < participation_rate:
-                            st.warning("⚠️ 전체 평균 대비 참여율이 낮습니다. 추가 독려가 필요합니다.")
-                        if pos_rate < 50:
-                            st.error("❗ 리더와의 소통 빈도가 낮습니다. 1on1 문화 정착을 위한 캠페인을 권장합니다.")
-                        else:
-                            st.success("✅ 소통 문화가 안정적으로 정착되어 가고 있는 부문입니다.")
+                        st.write(f"✅ **1on1 활성화도:** 정기 소통 비중 **{pos_1on1_rate:.1f}%**")
+                        st.write(f"✅ **호칭제 안착도:** '님' 문화 정착 비중 **{pos_title_rate:.1f}%**")
+                        
+                        # 인사이트 로직
+                        if pos_1on1_rate < 50:
+                            st.warning("💬 리더와의 소통 빈도 확대가 필요합니다.")
+                        if pos_title_rate < 40:
+                            st.error("👔 기존 직위 호칭 사용이 빈번합니다. 수평적 문화 가이드가 필요합니다.")
+                        if pos_1on1_rate >= 70 and pos_title_rate >= 70:
+                            st.success("🌟 소통과 수평적 문화가 매우 우수하게 정착된 조직입니다.")
                     else:
-                        st.write("해당 부문의 응답 데이터가 아직 없습니다.")
+                        st.write("응답 데이터가 없습니다.")
 
     except Exception as e:
         st.error(f"데이터 분석 중 오류 발생: {e}")
 else:
-    st.info("엑셀 파일을 업로드하면 부문별 정원 기반 참여율과 인사이트가 생성됩니다.")
+    st.info("엑셀 파일을 업로드하면 고도화된 인사이트 리포트가 생성됩니다.")
           `
         }
       }, document.getElementById("root"));
